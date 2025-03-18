@@ -1,0 +1,15 @@
+*.exe
+*.obj
+*.o
+*.lib
+*.dll
+*.pdb
+*.ipch
+*.sdf
+*.VC.db
+.vs/
+Debug/
+Release/
+x64/
+x86/
+

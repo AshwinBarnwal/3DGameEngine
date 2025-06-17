@@ -60,7 +60,7 @@ simulate_game(Input* input, float dt) {
 	if (is_down(BUTTON_D)) fYaw -= 2.0f * dt;
 	
 	mat4x4 matRotZ, matRotX;
-	//fTheta += 1.0f * dt;
+	fTheta += 1.0f * dt;
 
 	matRotZ = Matrix_MakeRotationZ(fTheta * 0.5f);
 	matRotX = Matrix_MakeRotationX(fTheta);

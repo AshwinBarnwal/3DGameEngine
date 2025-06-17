@@ -1,5 +1,4 @@
 *.exe
-*.obj
 *.o
 *.lib
 *.dll

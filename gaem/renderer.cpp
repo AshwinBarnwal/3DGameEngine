@@ -1,16 +1,30 @@
 global_variable float render_scale = 0.01f;
 
+u32 palette[6] = {0xffff00, 0x00ffff, 0xff00ff, 0xff0000, 0x00ff00, 0x0000ff};
+
+struct vec2d
+{
+	float u = 0, v = 0;
+};
 
 struct vec3d
 {
-	float x=0, y=0, z=0, w=1;
+	float x, y, z, w;
+
+	vec3d(float x1, float y1, float z1) : x(x1), y(y1), z(z1), w(1.0f) {}
+	vec3d() : x(0), y(0), z(0), w(1.0f) {}
 };
 
 struct triangle
 {
 	vec3d p[3];
-	u32 base = 0xffffff;
-	u32 col;
+	u32    base = 0xffffff;   // default stays fine
+	u32    col;
+
+	triangle(const vec3d& a, const vec3d& b, const vec3d& c, u32 color = 0xffffff)
+		: p{ a, b, c }, base(color) {}
+
+	triangle() = default;
 };
 
 struct mesh
@@ -19,6 +33,7 @@ struct mesh
 
 	bool LoadFromObjectFile(string sFilename)
 	{
+		int count = 0;
 		ifstream f(sFilename);
 		if (!f.is_open())
 			return false;
@@ -44,7 +59,7 @@ struct mesh
 			{
 				int f[3];
 				s >> junk >> f[0] >> f[1] >> f[2];
-				tris.push_back({ verts[f[0] - 1], verts[f[1] - 1] , verts[f[2] - 1] });
+				tris.push_back({verts[f[0] - 1], verts[f[1] - 1] , verts[f[2] - 1]});
 			}
 		}
 		return true;
@@ -57,7 +72,7 @@ struct mat4x4
 };
 
 internal u32
-get_color(triangle& tri, float lum) {
+get_color(const triangle& tri, float lum) {
 	if (lum <= 0) return 0x000000; // No light, fully black
 
 	// Extract RGB components
@@ -71,50 +86,50 @@ get_color(triangle& tri, float lum) {
 
 
 internal vec3d
-Vector_Add(vec3d& v1, vec3d& v2)
+Vector_Add(const vec3d& v1, const vec3d& v2)
 {
 	return { v1.x + v2.x, v1.y + v2.y, v1.z + v2.z };
 }
 
 internal vec3d
-Vector_Sub(vec3d& v1, vec3d& v2)
+Vector_Sub(const vec3d& v1, const vec3d& v2)
 {
 	return { v1.x - v2.x, v1.y - v2.y, v1.z - v2.z };
 }
 
 internal vec3d
-Vector_Mul(vec3d& v1, float k)
+Vector_Mul(const vec3d& v1, float k)
 {
 	return { v1.x * k , v1.y * k , v1.z * k };
 }
 
 internal vec3d
-Vector_Div(vec3d& v1, float k)
+Vector_Div(const vec3d& v1, float k)
 {
 	return { v1.x / k , v1.y / k , v1.z / k };
 }
 
 internal float
-Vector_DotProduct(vec3d& v1, vec3d& v2)
+Vector_DotProduct(const vec3d& v1, const vec3d& v2)
 {
 	return v1.x * v2.x + v1.y * v2.y + v1.z * v2.z;
 }
 
 internal float
-Vector_Length(vec3d& v)
+Vector_Length(const vec3d& v)
 {
 	return sqrtf(Vector_DotProduct(v, v));
 }
 
 internal vec3d
-Vector_Normalize(vec3d& v)
+Vector_Normalize(const vec3d& v)
 {
 	float l = Vector_Length(v);
 	return { v.x / l, v.y / l, v.z / l };
 }
 
 internal vec3d
-Vector_CrossProduct(vec3d& v1, vec3d& v2)
+Vector_CrossProduct(const vec3d& v1, const vec3d& v2)
 {
 	vec3d v;
 	v.x = v1.y * v2.z - v1.z * v2.y;
@@ -124,7 +139,7 @@ Vector_CrossProduct(vec3d& v1, vec3d& v2)
 }
 
 internal vec3d 
-Matrix_MultiplyVector(mat4x4 &m, vec3d &i)
+Matrix_MultiplyVector(const mat4x4 &m, const vec3d &i)
 {
 	vec3d v;
 	v.x = i.x * m.m[0][0] + i.y * m.m[1][0] + i.z * m.m[2][0] + i.w * m.m[3][0];
@@ -206,7 +221,7 @@ mat4x4 Matrix_MakeProjection(float fFovDegrees, float fAspectRatio, float fNear,
 	return matrix;
 }
 
-mat4x4 Matrix_MultiplyMatrix(mat4x4& m1, mat4x4& m2)
+mat4x4 Matrix_MultiplyMatrix(const mat4x4& m1, const mat4x4& m2)
 {
 	mat4x4 matrix;
 	for (int c = 0; c < 4; c++)
@@ -215,7 +230,7 @@ mat4x4 Matrix_MultiplyMatrix(mat4x4& m1, mat4x4& m2)
 	return matrix;
 }
 
-mat4x4 Matrix_PointAt(vec3d& pos, vec3d& target, vec3d& up)
+mat4x4 Matrix_PointAt(const vec3d& pos, const vec3d& target, const vec3d& up)
 {
 	// Calculate new forward direction
 	vec3d newForward = Vector_Sub(target, pos);
@@ -239,7 +254,7 @@ mat4x4 Matrix_PointAt(vec3d& pos, vec3d& target, vec3d& up)
 
 }
 
-mat4x4 Matrix_QuickInverse(mat4x4& m) // Only for Rotation/Translation Matrices
+mat4x4 Matrix_QuickInverse(const mat4x4& m) // Only for Rotation/Translation Matrices
 {
 	mat4x4 matrix;
 	matrix.m[0][0] = m.m[0][0]; matrix.m[0][1] = m.m[1][0]; matrix.m[0][2] = m.m[2][0]; matrix.m[0][3] = 0.0f;
@@ -366,7 +381,19 @@ int Triangle_ClipAgainstPlane(vec3d plane_p, vec3d plane_n, triangle& in_tri, tr
 	}
 }
 
-internal void 
+
+internal void clear_screen(u32 color)
+{
+	#pragma omp parallel for
+		for (int y = 0; y < render_state.height; ++y)
+		{
+			u32* row = (u32*)render_state.memory + y * render_state.width;
+
+			for (int x = 0; x < render_state.width; ++x)
+				row[x] = color + y / 10;
+		}
+}
+/*internal void
 clear_screen(u32 color) {
 	u32* pixel = (u32*)render_state.memory;
 	for (int y = 0; y < render_state.height; y++) {
@@ -374,7 +401,7 @@ clear_screen(u32 color) {
 			*pixel++ = color + y/10;
 		}
 	}
-}
+}*/
 
 internal void 
 draw_rect_in_pixels(int x0, int y0, int x1, int y1, u32 color) {

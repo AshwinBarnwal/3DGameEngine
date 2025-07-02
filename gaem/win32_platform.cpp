@@ -1,3 +1,4 @@
+#define _SILENCE_CXX17_STRSTREAM_DEPRECATION_WARNING
 #include <fstream>
 #include <strstream>
 #include <windows.h>
@@ -6,6 +7,8 @@
 #include <algorithm>
 #include <cmath>
 #include <list>
+#include <omp.h>
+#include <execution>
 #include "utils.cpp"
 
 using namespace std;

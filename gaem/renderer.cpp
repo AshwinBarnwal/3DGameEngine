@@ -2,9 +2,69 @@ global_variable float render_scale = 0.01f;
 
 u32 palette[6] = {0xffff00, 0x00ffff, 0xff00ff, 0xff0000, 0x00ff00, 0x0000ff};
 
+struct TextureSprite
+{
+	int width = 0;
+	int height = 0;
+	std::vector<uint32_t> pixels; // 0x00RRGGBB
+
+	TextureSprite() = default;
+
+	explicit TextureSprite(const std::string& filename)
+	{
+		load(filename);
+	}
+
+	bool load(const std::string& filename)
+	{
+		std::ifstream file(filename, std::ios::binary);
+		if (!file.is_open()) return false;
+
+		std::string magic;
+		file >> magic;
+		if (magic != "P6") return false;
+
+		file >> width >> height;
+		int max_val;
+		file >> max_val;
+		file.ignore(1); // skip one whitespace character (newline after max_val)
+
+		if (width <= 0 || height <= 0 || max_val != 255) return false;
+
+		pixels.resize(width * height);
+
+		for (int i = 0; i < width * height; ++i)
+		{
+			unsigned char rgb[3];
+			file.read(reinterpret_cast<char*>(rgb), 3);
+			// Format: 0x00RRGGBB
+			pixels[i] = (rgb[0] << 16) | (rgb[1] << 8) | (rgb[2]);
+		}
+
+		return true;
+	}
+
+	inline uint32_t SampleColour(float u, float v) const
+	{
+		// Clamp or wrap UV to [0,1)
+		u = u - std::floor(u);
+		v = v - std::floor(v);
+
+		int x = static_cast<int>(u * width);
+		int y = static_cast<int>(v * height);
+
+		x = min(max(x, 0), width - 1);
+		y = min(max(y, 0), height - 1);
+
+		return pixels[y * width + x];
+	}
+};
+
 struct vec2d
 {
-	float u = 0, v = 0;
+	float u, v, w;
+	vec2d(float u1, float v1) : u(u1), v(v1) {}
+	vec2d() : u(0.0f), v(0.0f), w(1.0f) {}
 };
 
 struct vec3d
@@ -15,17 +75,51 @@ struct vec3d
 	vec3d() : x(0), y(0), z(0), w(1.0f) {}
 };
 
+struct Light {
+	vec3d dir;
+	float intensity;
+};
+
 struct triangle
 {
 	vec3d p[3];
+	vec2d t[3];
 	u32    base = 0xffffff;   // default stays fine
 	u32    col;
 
 	triangle(const vec3d& a, const vec3d& b, const vec3d& c, u32 color = 0xffffff)
 		: p{ a, b, c }, base(color) {}
 
+	triangle(const vec3d& a, const vec3d& b, const vec3d& c, const vec2d& u, const vec2d& v, const vec2d& w,   u32 color = 0xffffff)
+		: p{ a,b,c }, t{ u,v,w }, base(color) {}
 	triangle() = default;
 };
+
+inline u32 height_to_rgb(float h)
+{
+	float ma = 1.3f;
+	h = std::clamp(h, 0.f, ma*2.0f);
+
+	u8 r{}, g{}, b{};
+
+	if (h <= ma) {
+		float t = h/ma;
+		r = static_cast<uint8_t>(255 * (1.0f - t));
+		g = static_cast<uint8_t>(255 * t);
+		b = 0;
+	}
+	else {
+		float t = (h - ma)/ma;
+		r = 0;
+		g = static_cast<u8>(255 * (1.0f - t));
+		b = static_cast<u8>(255 * t);
+	}
+
+	return  (static_cast<u32>(r) << 16) |
+		(static_cast<u32>(g) << 8) |
+		(static_cast<u32>(b));
+}
+
 
 struct mesh
 {
@@ -59,7 +153,15 @@ struct mesh
 			{
 				int f[3];
 				s >> junk >> f[0] >> f[1] >> f[2];
-				tris.push_back({verts[f[0] - 1], verts[f[1] - 1] , verts[f[2] - 1]});
+				const vec3d& v1 = verts[f[0] - 1];
+				const vec3d& v2 = verts[f[1] - 1];
+				const vec3d& v3 = verts[f[2] - 1];
+
+				float h = (v1.y + v2.y + v3.y) / 3.0f;
+
+				uint32_t col = height_to_rgb(h);
+
+				tris.push_back(triangle(v1, v2, v3, col));
 			}
 		}
 		return true;
@@ -74,7 +176,7 @@ struct mat4x4
 internal u32
 get_color(const triangle& tri, float lum) {
 	if (lum <= 0) return 0x000000; // No light, fully black
-
+	if (lum > 1) lum = 1.0f;
 	// Extract RGB components
 	u8 r = ((u8)((tri.base >> 16) & 0xFF) * lum); // Max red (255) scaled by lum
 	u8 g = ((u8)((tri.base >> 8) & 0xFF) * lum); // Max green (255) scaled by lum
@@ -267,13 +369,13 @@ mat4x4 Matrix_QuickInverse(const mat4x4& m) // Only for Rotation/Translation Mat
 	return matrix;
 }
 
-vec3d Vector_IntersectPlane(vec3d& plane_p, vec3d& plane_n, vec3d& lineStart, vec3d& lineEnd)
+vec3d Vector_IntersectPlane(vec3d& plane_p, vec3d& plane_n, vec3d& lineStart, vec3d& lineEnd, float &t)
 {
 	plane_n = Vector_Normalize(plane_n);
 	float plane_d = -Vector_DotProduct(plane_n, plane_p);
 	float ad = Vector_DotProduct(lineStart, plane_n);
 	float bd = Vector_DotProduct(lineEnd, plane_n);
-	float t = (-plane_d - ad) / (bd - ad);
+	t = (-plane_d - ad) / (bd - ad);
 	vec3d lineStartToEnd = Vector_Sub(lineEnd, lineStart);
 	vec3d lineToIntersect = Vector_Mul(lineStartToEnd, t);
 	return Vector_Add(lineStart, lineToIntersect);
@@ -295,18 +397,31 @@ int Triangle_ClipAgainstPlane(vec3d plane_p, vec3d plane_n, triangle& in_tri, tr
 	// If distance sign is positive, point lies on "inside" of plane
 	vec3d* inside_points[3];  int nInsidePointCount = 0;
 	vec3d* outside_points[3]; int nOutsidePointCount = 0;
+	vec2d* inside_tex[3]; int nInsideTexCount = 0;
+	vec2d* outside_tex[3]; int nOutsideTexCount = 0;
+
 
 	// Get signed distance of each point in triangle to plane
 	float d0 = dist(in_tri.p[0]);
 	float d1 = dist(in_tri.p[1]);
 	float d2 = dist(in_tri.p[2]);
 
-	if (d0 >= 0) { inside_points[nInsidePointCount++] = &in_tri.p[0]; }
-	else { outside_points[nOutsidePointCount++] = &in_tri.p[0]; }
-	if (d1 >= 0) { inside_points[nInsidePointCount++] = &in_tri.p[1]; }
-	else { outside_points[nOutsidePointCount++] = &in_tri.p[1]; }
-	if (d2 >= 0) { inside_points[nInsidePointCount++] = &in_tri.p[2]; }
-	else { outside_points[nOutsidePointCount++] = &in_tri.p[2]; }
+	if (d0 >= 0) { inside_points[nInsidePointCount++] = &in_tri.p[0]; inside_tex[nInsideTexCount++] = &in_tri.t[0]; }
+	else {
+		outside_points[nOutsidePointCount++] = &in_tri.p[0]; outside_tex[nOutsideTexCount++] = &in_tri.t[0];
+	}
+	if (d1 >= 0) {
+		inside_points[nInsidePointCount++] = &in_tri.p[1]; inside_tex[nInsideTexCount++] = &in_tri.t[1];
+	}
+	else {
+		outside_points[nOutsidePointCount++] = &in_tri.p[1];  outside_tex[nOutsideTexCount++] = &in_tri.t[1];
+	}
+	if (d2 >= 0) {
+		inside_points[nInsidePointCount++] = &in_tri.p[2]; inside_tex[nInsideTexCount++] = &in_tri.t[2];
+	}
+	else {
+		outside_points[nOutsidePointCount++] = &in_tri.p[2];  outside_tex[nOutsideTexCount++] = &in_tri.t[2];
+	}
 
 	// Now classify triangle points, and break the input triangle into 
 	// smaller output triangles if required. There are four possible
@@ -342,11 +457,20 @@ int Triangle_ClipAgainstPlane(vec3d plane_p, vec3d plane_n, triangle& in_tri, tr
 
 		// The inside point is valid, so keep that...
 		out_tri1.p[0] = *inside_points[0];
+		out_tri1.t[0] = *inside_tex[0];
 
 		// but the two new points are at the locations where the 
 		// original sides of the triangle (lines) intersect with the plane
-		out_tri1.p[1] = Vector_IntersectPlane(plane_p, plane_n, *inside_points[0], *outside_points[0]);
-		out_tri1.p[2] = Vector_IntersectPlane(plane_p, plane_n, *inside_points[0], *outside_points[1]);
+		float t;
+		out_tri1.p[1] = Vector_IntersectPlane(plane_p, plane_n, *inside_points[0], *outside_points[0], t);
+		out_tri1.t[1].u = t * (outside_tex[0]->u - inside_tex[0]->u) + inside_tex[0]->u;
+		out_tri1.t[1].v = t * (outside_tex[0]->v - inside_tex[0]->v) + inside_tex[0]->v;
+		out_tri1.t[1].w = t * (outside_tex[0]->w - inside_tex[0]->w) + inside_tex[0]->w;
+
+		out_tri1.p[2] = Vector_IntersectPlane(plane_p, plane_n, *inside_points[0], *outside_points[1], t);
+		out_tri1.t[2].u = t * (outside_tex[1]->u - inside_tex[0]->u) + inside_tex[0]->u;
+		out_tri1.t[2].v = t * (outside_tex[1]->v - inside_tex[0]->v) + inside_tex[0]->v;
+		out_tri1.t[2].w = t * (outside_tex[1]->w - inside_tex[0]->w) + inside_tex[0]->w;
 
 		return 1; // Return the newly formed single triangle
 	}
@@ -363,20 +487,28 @@ int Triangle_ClipAgainstPlane(vec3d plane_p, vec3d plane_n, triangle& in_tri, tr
 		out_tri2.col = in_tri.col;
 		//out_tri2.col = 0x00ff00;
 
-		// The first triangle consists of the two inside points and a new
-		// point determined by the location where one side of the triangle
-		// intersects with the plane
 		out_tri1.p[0] = *inside_points[0];
 		out_tri1.p[1] = *inside_points[1];
-		out_tri1.p[2] = Vector_IntersectPlane(plane_p, plane_n, *inside_points[0], *outside_points[0]);
+		out_tri1.t[0] = *inside_tex[0];
+		out_tri1.t[1] = *inside_tex[1];
+
+		float t;
+		out_tri1.p[2] = Vector_IntersectPlane(plane_p, plane_n, *inside_points[0], *outside_points[0], t);
+		out_tri1.t[2].u = t * (outside_tex[0]->u - inside_tex[0]->u) + inside_tex[0]->u;
+		out_tri1.t[2].v = t * (outside_tex[0]->v - inside_tex[0]->v) + inside_tex[0]->v;
+		out_tri1.t[2].w = t * (outside_tex[0]->w - inside_tex[0]->w) + inside_tex[0]->w;
 
 		// The second triangle is composed of one of he inside points, a
 		// new point determined by the intersection of the other side of the 
 		// triangle and the plane, and the newly created point above
 		out_tri2.p[0] = *inside_points[1];
+		out_tri2.t[0] = *inside_tex[1];
 		out_tri2.p[1] = out_tri1.p[2];
-		out_tri2.p[2] = Vector_IntersectPlane(plane_p, plane_n, *inside_points[1], *outside_points[0]);
-
+		out_tri2.t[1] = out_tri1.t[2];
+		out_tri2.p[2] = Vector_IntersectPlane(plane_p, plane_n, *inside_points[1], *outside_points[0], t);
+		out_tri2.t[2].u = t * (outside_tex[0]->u - inside_tex[1]->u) + inside_tex[1]->u;
+		out_tri2.t[2].v = t * (outside_tex[0]->v - inside_tex[1]->v) + inside_tex[1]->v;
+		out_tri2.t[2].w = t * (outside_tex[0]->w - inside_tex[1]->w) + inside_tex[1]->w;
 		return 2; // Return two newly formed triangles which form a quad
 	}
 }
@@ -388,10 +520,15 @@ internal void clear_screen(u32 color)
 		for (int y = 0; y < render_state.height; ++y)
 		{
 			u32* row = (u32*)render_state.memory + y * render_state.width;
-
+			
 			for (int x = 0; x < render_state.width; ++x)
-				row[x] = color + y / 10;
+				
+			{
+				row[x] = color;
+				//pDepthBuffer[y*render_state.width+x]=0.0f;
+			}
 		}
+		
 }
 /*internal void
 clear_screen(u32 color) {
@@ -504,12 +641,12 @@ fill_triangle(int x1, int y1, int x2, int y2, int x3, int y3, u32 color)
 	if (y2 > y3) { swap(x2, x3); swap(y2, y3); }
 
 	// Clamping
-	x1 = clamp(0, x1, render_state.width - 1);
-	y1 = clamp(0, y1, render_state.height - 1);
-	x2 = clamp(0, x2, render_state.width - 1);
-	y2 = clamp(0, y2, render_state.height - 1);
-	x3 = clamp(0, x3, render_state.width - 1);
-	y3 = clamp(0, y3, render_state.height - 1);
+	//x1 = clamp(0, x1, render_state.width - 1);
+	//y1 = clamp(0, y1, render_state.height - 1);
+	//x2 = clamp(0, x2, render_state.width - 1);
+	//y2 = clamp(0, y2, render_state.height - 1);
+	//x3 = clamp(0, x3, render_state.width - 1);
+	//y3 = clamp(0, y3, render_state.height - 1);
 
 	// Edge cases
 	if (y1 == y2 && y2 == y3) return; // All points on same line, no area to fill
@@ -552,3 +689,174 @@ fill_triangle(int x1, int y1, int x2, int y2, int x3, int y3, u32 color)
 		}
 	}
 }
+
+
+//internal void 
+//texture_triangle(int x1, int y1, float u1, float v1, float w1,
+//	int x2, int y2, float u2, float v2, float w2,
+//	int x3, int y3, float u3, float v3, float w3,
+//	olcSprite* tex)
+//{
+//	if (y2 < y1)
+//	{
+//		swap(y1, y2);
+//		swap(x1, x2);
+//		swap(u1, u2);
+//		swap(v1, v2);
+//		swap(w1, w2);
+//	}
+//
+//	if (y3 < y1)
+//	{
+//		swap(y1, y3);
+//		swap(x1, x3);
+//		swap(u1, u3);
+//		swap(v1, v3);
+//		swap(w1, w3);
+//	}
+//
+//	if (y3 < y2)
+//	{
+//		swap(y2, y3);
+//		swap(x2, x3);
+//		swap(u2, u3);
+//		swap(v2, v3);
+//		swap(w2, w3);
+//	}
+//
+//	int dy1 = y2 - y1;
+//	int dx1 = x2 - x1;
+//	float dv1 = v2 - v1;
+//	float du1 = u2 - u1;
+//	float dw1 = w2 - w1;
+//
+//	int dy2 = y3 - y1;
+//	int dx2 = x3 - x1;
+//	float dv2 = v3 - v1;
+//	float du2 = u3 - u1;
+//	float dw2 = w3 - w1;
+//
+//	float tex_u, tex_v, tex_w;
+//
+//	float dax_step = 0, dbx_step = 0,
+//		du1_step = 0, dv1_step = 0,
+//		du2_step = 0, dv2_step = 0,
+//		dw1_step = 0, dw2_step = 0;
+//
+//	if (dy1) dax_step = dx1 / (float)abs(dy1);
+//	if (dy2) dbx_step = dx2 / (float)abs(dy2);
+//
+//	if (dy1) du1_step = du1 / (float)abs(dy1);
+//	if (dy1) dv1_step = dv1 / (float)abs(dy1);
+//	if (dy1) dw1_step = dw1 / (float)abs(dy1);
+//
+//	if (dy2) du2_step = du2 / (float)abs(dy2);
+//	if (dy2) dv2_step = dv2 / (float)abs(dy2);
+//	if (dy2) dw2_step = dw2 / (float)abs(dy2);
+//
+//	if (dy1)
+//	{
+//		for (int i = y1; i <= y2; i++)
+//		{
+//			int ax = x1 + (float)(i - y1) * dax_step;
+//			int bx = x1 + (float)(i - y1) * dbx_step;
+//
+//			float tex_su = u1 + (float)(i - y1) * du1_step;
+//			float tex_sv = v1 + (float)(i - y1) * dv1_step;
+//			float tex_sw = w1 + (float)(i - y1) * dw1_step;
+//
+//			float tex_eu = u1 + (float)(i - y1) * du2_step;
+//			float tex_ev = v1 + (float)(i - y1) * dv2_step;
+//			float tex_ew = w1 + (float)(i - y1) * dw2_step;
+//
+//			if (ax > bx)
+//			{
+//				swap(ax, bx);
+//				swap(tex_su, tex_eu);
+//				swap(tex_sv, tex_ev);
+//				swap(tex_sw, tex_ew);
+//			}
+//
+//			tex_u = tex_su;
+//			tex_v = tex_sv;
+//			tex_w = tex_sw;
+//
+//			float tstep = 1.0f / ((float)(bx - ax));
+//			float t = 0.0f;
+//
+//			for (int j = ax; j < bx; j++)
+//			{
+//				tex_u = (1.0f - t) * tex_su + t * tex_eu;
+//				tex_v = (1.0f - t) * tex_sv + t * tex_ev;
+//				tex_w = (1.0f - t) * tex_sw + t * tex_ew;
+//				if (tex_w > pDepthBuffer[i * render_state.width + j])
+//				{
+//					Draw(j, i, tex->SampleGlyph(tex_u / tex_w, tex_v / tex_w), tex->SampleColour(tex_u / tex_w, tex_v / tex_w));
+//					pDepthBuffer[i * render_state.width + j] = tex_w;
+//				}
+//				t += tstep;
+//			}
+//
+//		}
+//	}
+//
+//	dy1 = y3 - y2;
+//	dx1 = x3 - x2;
+//	dv1 = v3 - v2;
+//	du1 = u3 - u2;
+//	dw1 = w3 - w2;
+//
+//	if (dy1) dax_step = dx1 / (float)abs(dy1);
+//	if (dy2) dbx_step = dx2 / (float)abs(dy2);
+//
+//	du1_step = 0, dv1_step = 0;
+//	if (dy1) du1_step = du1 / (float)abs(dy1);
+//	if (dy1) dv1_step = dv1 / (float)abs(dy1);
+//	if (dy1) dw1_step = dw1 / (float)abs(dy1);
+//
+//	if (dy1)
+//	{
+//		for (int i = y2; i <= y3; i++)
+//		{
+//			int ax = x2 + (float)(i - y2) * dax_step;
+//			int bx = x1 + (float)(i - y1) * dbx_step;
+//
+//			float tex_su = u2 + (float)(i - y2) * du1_step;
+//			float tex_sv = v2 + (float)(i - y2) * dv1_step;
+//			float tex_sw = w2 + (float)(i - y2) * dw1_step;
+//
+//			float tex_eu = u1 + (float)(i - y1) * du2_step;
+//			float tex_ev = v1 + (float)(i - y1) * dv2_step;
+//			float tex_ew = w1 + (float)(i - y1) * dw2_step;
+//
+//			if (ax > bx)
+//			{
+//				swap(ax, bx);
+//				swap(tex_su, tex_eu);
+//				swap(tex_sv, tex_ev);
+//				swap(tex_sw, tex_ew);
+//			}
+//
+//			tex_u = tex_su;
+//			tex_v = tex_sv;
+//			tex_w = tex_sw;
+//
+//			float tstep = 1.0f / ((float)(bx - ax));
+//			float t = 0.0f;
+//
+//			for (int j = ax; j < bx; j++)
+//			{
+//				tex_u = (1.0f - t) * tex_su + t * tex_eu;
+//				tex_v = (1.0f - t) * tex_sv + t * tex_ev;
+//				tex_w = (1.0f - t) * tex_sw + t * tex_ew;
+//
+//				if (tex_w > pDepthBuffer[i * render_state.width + j])
+//				{
+//					Draw(j, i, tex->SampleGlyph(tex_u / tex_w, tex_v / tex_w), tex->SampleColour(tex_u / tex_w, tex_v / tex_w));
+//					pDepthBuffer[i * render_state.width + j] = tex_w;
+//				}
+//				t += tstep;
+//			}
+//		}
+//	}
+//}

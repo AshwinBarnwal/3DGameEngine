@@ -9,46 +9,53 @@ float ball_speed=150,ball_p_x, ball_p_y, ball_dp_x=ball_speed, ball_dp_y;
 float cursorx=0, cursory=0;
 
 mesh meshCube;
-
+float* pDepthBuffer = nullptr;
 mat4x4 matProj;
 vec3d vCamera;
 vec3d vLookDir;
 float fYaw;
 float fTheta;
 
+Light gLights[] = {
+    { Vector_Normalize({  0.0f,  0.0f, -1.0f }), 1.0f },  // key light
+    { Vector_Normalize({ 0.0f, 0.0f, 1.0f }), 0.2f },  // fill light
+    { Vector_Normalize({  -1.0f,  0.0f, -1.0f }), 0.3f }   // rim light
+};
+
 internal bool
 initialize_game() 
 {
+    pDepthBuffer = new float[render_state.width * render_state.height];
 	matProj = Matrix_MakeProjection(90.0f, (float)render_state.height / (float)render_state.width, 0.1f, 1000.0f);
     //meshCube.tris = {
 
     //    // SOUTH
-    //    { vec3d(0.0f, 0.0f, 0.0f),    vec3d(0.0f, 1.0f, 0.0f),    vec3d(1.0f, 1.0f, 0.0f) },
-    //    { vec3d(0.0f, 0.0f, 0.0f),    vec3d(1.0f, 1.0f, 0.0f),    vec3d(1.0f, 0.0f, 0.0f) },
+    //    triangle(vec3d(0.0f, 0.0f, 0.0f),    vec3d(0.0f, 1.0f, 0.0f),    vec3d(1.0f, 1.0f, 0.0f) , vec2d(0.0f, 1.0f), vec2d(0.0f, 0.0f), vec2d(1.0f, 0.0f)),
+    //    triangle(vec3d(0.0f, 0.0f, 0.0f),    vec3d(1.0f, 1.0f, 0.0f),    vec3d(1.0f, 0.0f, 0.0f) , vec2d(0.0f, 1.0f), vec2d(1.0f, 0.0f), vec2d(1.0f, 1.0f)),
 
     //    // EAST                                                      
-    //    { vec3d(1.0f, 0.0f, 0.0f),    vec3d(1.0f, 1.0f, 0.0f),    vec3d(1.0f, 1.0f, 1.0f) },
-    //    { vec3d(1.0f, 0.0f, 0.0f),    vec3d(1.0f, 1.0f, 1.0f),    vec3d(1.0f, 0.0f, 1.0f) },
+    //    triangle(vec3d(1.0f, 0.0f, 0.0f),    vec3d(1.0f, 1.0f, 0.0f),    vec3d(1.0f, 1.0f, 1.0f) , vec2d(0.0f, 1.0f), vec2d(0.0f, 0.0f), vec2d(1.0f, 0.0f)),
+    //    triangle(vec3d(1.0f, 0.0f, 0.0f),    vec3d(1.0f, 1.0f, 1.0f),    vec3d(1.0f, 0.0f, 1.0f) , vec2d(0.0f, 1.0f), vec2d(1.0f, 0.0f), vec2d(1.0f, 1.0f)),
 
     //    // NORTH                                                     
-    //    { vec3d(1.0f, 0.0f, 1.0f),    vec3d(1.0f, 1.0f, 1.0f),    vec3d(0.0f, 1.0f, 1.0f) },
-    //    { vec3d(1.0f, 0.0f, 1.0f),    vec3d(0.0f, 1.0f, 1.0f),    vec3d(0.0f, 0.0f, 1.0f) },
+    //    triangle(vec3d(1.0f, 0.0f, 1.0f),    vec3d(1.0f, 1.0f, 1.0f),    vec3d(0.0f, 1.0f, 1.0f) , vec2d(0.0f, 1.0f), vec2d(0.0f, 0.0f), vec2d(1.0f, 0.0f)),
+    //    triangle(vec3d(1.0f, 0.0f, 1.0f),    vec3d(0.0f, 1.0f, 1.0f),    vec3d(0.0f, 0.0f, 1.0f) , vec2d(0.0f, 1.0f), vec2d(1.0f, 0.0f), vec2d(1.0f, 1.0f)),
 
     //    // WEST                                                      
-    //    {vec3d(0.0f, 0.0f, 1.0f),    vec3d(0.0f, 1.0f, 1.0f),    vec3d(0.0f, 1.0f, 0.0f) },
-    //    { vec3d(0.0f, 0.0f, 1.0f),    vec3d(0.0f, 1.0f, 0.0f),    vec3d(0.0f, 0.0f, 0.0f) },
+    //    triangle(vec3d(0.0f, 0.0f, 1.0f),    vec3d(0.0f, 1.0f, 1.0f),    vec3d(0.0f, 1.0f, 0.0f) ,vec2d(0.0f, 1.0f), vec2d(0.0f, 0.0f), vec2d(1.0f, 0.0f)),
+    //    triangle(vec3d(0.0f, 0.0f, 1.0f),    vec3d(0.0f, 1.0f, 0.0f),    vec3d(0.0f, 0.0f, 0.0f) , vec2d(0.0f, 1.0f), vec2d(1.0f, 0.0f), vec2d(1.0f, 1.0f)),
 
     //    // TOP                                                       
-    //    { vec3d(0.0f, 1.0f, 0.0f),    vec3d(0.0f, 1.0f, 1.0f),    vec3d(1.0f, 1.0f, 1.0f) },
-    //    { vec3d(0.0f, 1.0f, 0.0f),    vec3d(1.0f, 1.0f, 1.0f),    vec3d(1.0f, 1.0f, 0.0f) },
+    //    triangle(vec3d(0.0f, 1.0f, 0.0f),    vec3d(0.0f, 1.0f, 1.0f),    vec3d(1.0f, 1.0f, 1.0f) , vec2d(0.0f, 1.0f), vec2d(0.0f, 0.0f), vec2d(1.0f, 0.0f)),
+    //    triangle(vec3d(0.0f, 1.0f, 0.0f),    vec3d(1.0f, 1.0f, 1.0f),    vec3d(1.0f, 1.0f, 0.0f) , vec2d(0.0f, 1.0f), vec2d(1.0f, 0.0f), vec2d(1.0f, 1.0f)),
 
     //    // BOTTOM                                                    
-    //    { vec3d(1.0f, 0.0f, 1.0f),    vec3d(0.0f, 0.0f, 1.0f),    vec3d(0.0f, 0.0f, 0.0f) },
-    //    { vec3d(1.0f, 0.0f, 1.0f),    vec3d(0.0f, 0.0f, 0.0f),    vec3d(1.0f, 0.0f, 0.0f) },
+    //    triangle(vec3d(1.0f, 0.0f, 1.0f),    vec3d(0.0f, 0.0f, 1.0f),    vec3d(0.0f, 0.0f, 0.0f) , vec2d(0.0f, 1.0f), vec2d(0.0f, 0.0f), vec2d(1.0f, 0.0f)),
+    //    triangle(vec3d(1.0f, 0.0f, 1.0f),    vec3d(0.0f, 0.0f, 0.0f),    vec3d(1.0f, 0.0f, 0.0f) , vec2d(0.0f, 1.0f), vec2d(1.0f, 0.0f), vec2d(1.0f, 1.0f)),
 
     //    };
     //return true;
-	return meshCube.LoadFromObjectFile("monkey_ori.obj"); 
+	return meshCube.LoadFromObjectFile("utah.obj"); 
 }
 
 internal void
@@ -87,7 +94,7 @@ simulate_game(Input* input, float dt) {
 	if (is_down(BUTTON_D)) fYaw -= 2.0f * dt;
 	
 	mat4x4 matRotZ, matRotX;
-	fTheta += 1.0f * dt;
+	//fTheta += 1.0f * dt;
 
 	matRotZ = Matrix_MakeRotationZ(fTheta * 0.5f);
 	matRotX = Matrix_MakeRotationX(fTheta);
@@ -129,6 +136,9 @@ simulate_game(Input* input, float dt) {
             triTransformed.p[1] = Matrix_MultiplyVector(matWorld, tri.p[1]);
             triTransformed.p[2] = Matrix_MultiplyVector(matWorld, tri.p[2]);
             triTransformed.base = tri.base;
+            triTransformed.t[0] = tri.t[0];
+            triTransformed.t[1] = tri.t[1];
+            triTransformed.t[2] = tri.t[2];
 
             vec3d line1 = Vector_Sub(triTransformed.p[1], triTransformed.p[0]);
             vec3d line2 = Vector_Sub(triTransformed.p[2], triTransformed.p[0]);
@@ -137,26 +147,53 @@ simulate_game(Input* input, float dt) {
 
             if (Vector_DotProduct(normal, vCameraRay) < 0.0f)
             {
-                vec3d light_direction = { cursorx * 0.1f, cursory * 0.0f, -1.0f };
-                light_direction = Vector_Normalize(light_direction);
-                float dp = max(0.1f, Vector_DotProduct(light_direction, normal));
-                triTransformed.col = get_color(triTransformed, dp);
-
+                float totalLum = 0.0f;
+                for (int i=0;i<3;i++)
+                {
+                    float dp = max(0.0f, Vector_DotProduct(normal, gLights[i].dir));
+                    totalLum += dp * gLights[i].intensity;
+                }
+                //vec3d light_direction = { cursorx * 0.1f, cursory * 0.0f, -1.0f };
+                //light_direction = Vector_Normalize(light_direction);
+                //float dp = max(0.1f, Vector_DotProduct(light_direction, normal));
+                triTransformed.col = get_color(triTransformed, totalLum);
+                //triTransformed.col = triTransformed.base;
                 triViewed.p[0] = Matrix_MultiplyVector(matView, triTransformed.p[0]);
                 triViewed.p[1] = Matrix_MultiplyVector(matView, triTransformed.p[1]);
                 triViewed.p[2] = Matrix_MultiplyVector(matView, triTransformed.p[2]);
-
+                triViewed.t[0] = triTransformed.t[0];
+                triViewed.t[1] = triTransformed.t[1];
+                triViewed.t[2] = triTransformed.t[2];
                 triangle clipped[2];
                 int nClipped = Triangle_ClipAgainstPlane(
                     { 0.0f, 0.0f, 0.1f }, { 0.0f, 0.0f, 1.0f },
                     triViewed, clipped[0], clipped[1]);
-
+                // We may end up with multiple triangles form the clip, so project as
+                // required
                 for (int n = 0; n < nClipped; ++n)
                 {
+                    // Project triangles from 3D --> 2D
                     triProjected.p[0] = Matrix_MultiplyVector(matProj, clipped[n].p[0]);
                     triProjected.p[1] = Matrix_MultiplyVector(matProj, clipped[n].p[1]);
                     triProjected.p[2] = Matrix_MultiplyVector(matProj, clipped[n].p[2]);
                     triProjected.col = triTransformed.col;
+                    
+                    triProjected.t[0] = clipped[n].t[0];
+					triProjected.t[1] = clipped[n].t[1];
+					triProjected.t[2] = clipped[n].t[2];
+
+
+					triProjected.t[0].u = triProjected.t[0].u / triProjected.p[0].w;
+					triProjected.t[1].u = triProjected.t[1].u / triProjected.p[1].w;
+					triProjected.t[2].u = triProjected.t[2].u / triProjected.p[2].w;
+
+					triProjected.t[0].v = triProjected.t[0].v / triProjected.p[0].w;
+					triProjected.t[1].v = triProjected.t[1].v / triProjected.p[1].w;
+					triProjected.t[2].v = triProjected.t[2].v / triProjected.p[2].w;
+
+					triProjected.t[0].w = 1.0f / triProjected.p[0].w;
+					triProjected.t[1].w = 1.0f / triProjected.p[1].w;
+					triProjected.t[2].w = 1.0f / triProjected.p[2].w;
 
                     triProjected.p[0] = Vector_Div(triProjected.p[0], triProjected.p[0].w);
                     triProjected.p[1] = Vector_Div(triProjected.p[1], triProjected.p[1].w);
@@ -222,6 +259,7 @@ simulate_game(Input* input, float dt) {
 
         for (auto& t : listTriangles)
             fill_triangle(t.p[0].x, t.p[0].y, t.p[1].x, t.p[1].y, t.p[2].x, t.p[2].y, t.col);
+            //draw_triangle_new(t.p[0].x, t.p[0].y, t.p[1].x, t.p[1].y, t.p[2].x, t.p[2].y, 0xffffff, 2);
     }
 
     draw_rect(cursorx, cursory, 1.0f, 1.0f, 0xffffff);
